@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ALTURA (cm) – Especies izquierda / Años derecha</title>
+  <style>
+    :root{ --bg:#f8fafc; --fg:#0f172a; --muted:#64748b; --border:#e2e8f0; --accent:#0ea5e9; --soft:#e0f2fe; }
+    *{ box-sizing:border-box }
+    body{ margin:0; background:var(--bg); font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial; color:var(--fg); }
+    header{ padding:16px 16px 8px }
+    h1{ margin:0; font-size:20px }
+    .sub{ color:var(--muted); margin-top:6px; font-size:14px }
+
+    .shell{
+      display:grid;
+      grid-template-columns: 260px 1fr 220px; /* izquierda | centro | derecha */
+      gap:12px;
+      padding:0 16px 16px;
+      align-items:stretch;
+      max-width:1400px;
+      margin:0 auto;
+    }
+    @media (max-width: 1024px){
+      .shell{ grid-template-columns: 240px 1fr 200px; }
+    }
+    @media (max-width: 880px){
+      .shell{ grid-template-columns: 1fr; }
+    }
+
+    .card{ background:#fff; border:1px solid var(--border); border-radius:12px; display:flex; flex-direction:column; min-height:0; }
+    .card .hdr{ display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--border); }
+    .card .body{ padding:10px 12px; overflow:auto; min-height:0; }
+    .cbgrid{ display:grid; grid-template-columns: 1fr; gap:8px; }
+    .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    button{ border:1px solid var(--border); background:#fff; border-radius:10px; padding:8px 12px; font-size:13px; cursor:pointer }
+    button:hover{ border-color:var(--accent); box-shadow:0 0 0 4px var(--soft) }
+    label.cb{ display:flex; align-items:center; gap:8px; }
+
+    /* Centro (gráfico) ocupa la altura disponible del viewport */
+    .chart-card{ padding:10px 12px; }
+    .chart-wrap{
+      position:relative;
+      width:100%;
+      height: calc(100vh - 170px); /* ajusta al alto de pantalla restando header y márgenes */
+      min-height: 380px;
+      max-height: 900px;
+    }
+    @media (max-width: 880px){
+      .chart-wrap{ height: 60vh; }
+    }
+    canvas{ width:100% !important; height:100% !important; } /* forzar ajuste */
+    .hint{ color:var(--muted); font-size:12px }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ALTURA (cm)</h1>
+    <div class="sub">Especies a la izquierda, gráfico al centro, años a la derecha. Escala y tamaño del gráfico se ajustan al alto de la pantalla.</div>
+  </header>
+
+  <div class="shell">
+    <!-- Panel izquierdo: especies -->
+    <section class="card">
+      <div class="hdr">
+        <strong>Especies</strong>
+        <div class="row">
+          <button id="allSpecies">Todas</button>
+          <button id="noneSpecies">Ninguna</button>
+        </div>
+      </div>
+      <div id="speciesChecks" class="body cbgrid"></div>
+    </section>
+
+    <!-- Centro: gráfico -->
+    <section class="card chart-card">
+      <div class="row" style="justify-content:space-between; margin:4px 0 8px">
+        <span class="hint">Sugerencia: pulse la leyenda para ocultar/mostrar años.</span>
+        <button id="downloadPng">Descargar PNG</button>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chart" aria-label="Gráfico ALTURA (cm)" role="img"></canvas>
+      </div>
+    </section>
+
+    <!-- Panel derecho: años -->
+    <section class="card">
+      <div class="hdr">
+        <strong>Años</strong>
+        <div class="row">
+          <button id="allYears">Todos</button>
+          <button id="noneYears">Ninguno</button>
+        </div>
+      </div>
+      <div id="yearChecks" class="body cbgrid" style="grid-template-columns:1fr 1fr"></div>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script>
+    // Datos base
+    const YEARS = ["2017","2018","2019","2020","2021","2022","2023","2024"];
+    const DATA = {
+      "Caimito": [40,60,80,100,120,130,140,150],
+      "Caimito Blanco": [35,55,95,120,140,150,160,190],
+      "Cañafistol": [15,30,55,85,110,140,180,260],
+      "Curumacho": [50,70,90,110,130,150,210,240],
+      "Gaque": [60,85,120,170,210,290,420,510],
+      "Guamo": [55,80,115,160,220,260,300,340],
+      "Guayabo": [35,60,90,110,120,125,130,135],
+      "Hobo": [15,25,35,50,60,80,95,110],
+      "Laurel": [10,20,45,65,95,140,200,250],
+      "Madroño": [10,18,28,40,55,70,90,110],
+      "Nauno": [25,45,70,95,120,135,380,100],
+      "Yopa": [80,130,250,320,380,460,520,620],
+      "Yopo": [30,45,60,75,90,105,120,135]
+    };
+    const COLORS = ["#2563eb","#f97316","#16a34a","#0ea5e9","#a855f7","#22c55e","#0f172a","#ea580c"];
+
+    // Construcción de checkboxes (label clicable)
+    function addCheckbox(container, id, text, checked=true){
+      const lab = document.createElement("label");
+      lab.className = "cb";
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.id = id; cb.checked = checked;
+      const span = document.createElement("span"); span.textContent = text;
+      lab.appendChild(cb); lab.appendChild(span);
+      container.appendChild(lab);
+      return cb;
+    }
+
+    const spContainer = document.getElementById("speciesChecks");
+    const yrContainer = document.getElementById("yearChecks");
+    const speciesList = Object.keys(DATA);
+    const speciesCBs = speciesList.map(s => addCheckbox(spContainer, "sp_"+s, s, true));
+    const yearCBs = YEARS.map(y => addCheckbox(yrContainer, "yr_"+y, y, true));
+
+    document.getElementById("allSpecies").onclick = ()=>{ speciesCBs.forEach(cb=>cb.checked=true); render(); };
+    document.getElementById("noneSpecies").onclick = ()=>{ speciesCBs.forEach(cb=>cb.checked=false); render(); };
+    document.getElementById("allYears").onclick = ()=>{ yearCBs.forEach(cb=>cb.checked=true); render(); };
+    document.getElementById("noneYears").onclick = ()=>{ yearCBs.forEach(cb=>cb.checked=false); render(); };
+
+    function getSelected(){
+      const selSpecies = speciesList.filter((s,i)=> speciesCBs[i].checked);
+      const selYears = YEARS.filter((y,i)=> yearCBs[i].checked);
+      return { selSpecies, selYears };
+    }
+
+    function buildDatasets(selSpecies, selYears){
+      const datasets = [];
+      selYears.forEach(y => {
+        const yi = YEARS.indexOf(y);
+        datasets.push({
+          label: y, // Leyenda: solo año
+          data: selSpecies.map(s => DATA[s][yi] ?? 0),
+          backgroundColor: COLORS[yi % COLORS.length],
+          maxBarThickness: 18,
+          categoryPercentage: 0.7,
+          barPercentage: 0.75
+        });
+      });
+      return datasets;
+    }
+
+    function niceMax(max){
+      if(!isFinite(max) || max<=0) return 10;
+      const raw = max * 1.05;
+      let step = 10;
+      if(raw > 800) step = 100;
+      else if(raw > 400) step = 50;
+      else if(raw > 200) step = 25;
+      else if(raw > 100) step = 20;
+      else step = 10;
+      return Math.ceil(raw / step) * step;
+    }
+
+    const ctx = document.getElementById("chart").getContext("2d");
+    let chart;
+
+    function render(){
+      const { selSpecies, selYears } = getSelected();
+      if(selSpecies.length === 0 || selYears.length === 0){
+        if(chart){ chart.destroy(); chart = null; }
+        return;
+      }
+      const datasets = buildDatasets(selSpecies, selYears);
+      const maxVal = Math.max(...datasets.flatMap(d => d.data));
+      const yMax = niceMax(maxVal);
+      const data = { labels: selSpecies, datasets };
+
+      if(chart) chart.destroy();
+      chart = new Chart(ctx, {
+        type: "bar",
+        data,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false, // se adapta al alto del contenedor (viewport)
+          plugins: {
+            legend: { position: "top", labels: { usePointStyle: true, boxWidth: 10 } },
+            title: { display: true, text: "ALTURA (Cm)" }
+          },
+          scales: {
+            x: { ticks: { autoSkip: false, maxRotation: 35, minRotation: 0 }, grid: { display:false } },
+            y: {
+              beginAtZero: true,
+              suggestedMax: yMax,
+              title: { display: true, text: "Crecimiento altura (cm)" },
+              grid: { color: "rgba(226,232,240,0.6)" }
+            }
+          },
+          animation: false
+        }
+      });
+    }
+
+    document.getElementById("downloadPng").onclick = ()=>{
+      if(!chart) return;
+      const a = document.createElement("a");
+      a.download = "altura_cm_lateral.png";
+      a.href = chart.toBase64Image();
+      a.click();
+    };
+
+    [...speciesCBs, ...yearCBs].forEach(cb => cb.addEventListener("change", render));
+    // Redibujar cuando cambia el tamaño de ventana para respetar la altura dinámica
+    window.addEventListener("resize", ()=> { if(chart) chart.resize(); });
+
+    render();
+  </script>
+</body>
+</html>
